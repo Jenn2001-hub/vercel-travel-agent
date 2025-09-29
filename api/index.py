@@ -1,8 +1,17 @@
-# api/app.py
-# FastAPI backend diseñado para el Runtime de Python en Vercel.
-# Endpoints: chat (orquestador), clima, planificación de itinerario y descargas (.txt / .ics).
+# api/index.py
+# Backend FastAPI para Vercel (ASGI). Usa:
+# - Groq (LLM) → generación de itinerario/chat
+# - Open-Meteo → clima (sin API key)
+# - SerpAPI → lugares/POIs para enriquecer el itinerario
+#
+# Rutas públicas (Vercel las sirve con prefijo /api):
+#   GET  /health
+#   POST /chat
+#   GET  /weather
+#   POST /itinerary
+#   POST /download/txt
+#   POST /download/ics
 
-import os
 import json
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
@@ -12,46 +21,44 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 
-# OpenAI opcional (instalado por requirements.txt)
+# Groq (LLM)
 try:
-    from openai import OpenAI
-except Exception:  # pragma: no cover
-    OpenAI = None  # type: ignore
+    from groq import Groq
+except Exception:
+    Groq = None  # type: ignore
 
-app = FastAPI(title="Travel Agent API", version="1.0.0")
+app = FastAPI(title="Travel Agent API (Groq+SerpAPI)", version="2.0.0")
 
 # ----- CORS -----
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ajusta en producción si quieres limitar
+    allow_origins=["*"],   # en prod puedes restringir tu dominio
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ----- Modelos -----
+# ====== MODELOS ======
 class UserKeys(BaseModel):
-    openai_api_key: str = Field(..., min_length=10)
+    groq_api_key: str = Field(..., min_length=10)
+    serpapi_api_key: Optional[str] = Field(None, min_length=10)
 
 class ChatMessage(BaseModel):
-    role: str  # "user" | "assistant" | "system"
+    role: str
     content: str
 
 class TripPrefs(BaseModel):
     location: str
     days: int = Field(..., ge=1, le=14)
-    start_date: Optional[str] = None  # ISO YYYY-MM-DD; por defecto mañana
-    language: str = Field("es", description="Idioma de la respuesta")
+    start_date: Optional[str] = None
+    language: str = Field("es")
 
     @validator("start_date", pre=True)
     def _validate_start_date(cls, v):
         if v in (None, "", "today", "mañana", "tomorrow"):
             return None
-        try:
-            datetime.fromisoformat(v)
-            return v
-        except Exception:
-            raise ValueError("start_date debe ser ISO YYYY-MM-DD o vacío")
+        datetime.fromisoformat(v)  # lanza si es inválida
+        return v
 
 class ChatRequest(BaseModel):
     keys: UserKeys
@@ -80,39 +87,21 @@ class Itinerary(BaseModel):
     days: List[ItineraryDay]
     weather_overview: str
 
-# ----- Constantes -----
+# ====== CONSTANTES ======
 WMO_CODE_MAP = {
-    0: "despejado/soleado",
-    1: "mayormente despejado",
-    2: "parcialmente nublado",
-    3: "nublado",
-    45: "niebla",
-    48: "niebla escarchada",
-    51: "llovizna ligera",
-    53: "llovizna moderada",
-    55: "llovizna densa",
-    56: "llovizna helada ligera",
-    57: "llovizna helada densa",
-    61: "lluvia ligera",
-    63: "lluvia moderada",
-    65: "lluvia intensa",
-    66: "lluvia helada ligera",
-    67: "lluvia helada intensa",
-    71: "nieve ligera",
-    73: "nieve moderada",
-    75: "nieve intensa",
-    77: "granizo",
-    80: "chubascos ligeros",
-    81: "chubascos moderados",
-    82: "chubascos fuertes",
-    85: "chubascos de nieve ligeros",
-    86: "chubascos de nieve fuertes",
-    95: "tormenta",
-    96: "tormenta con granizo ligera",
-    99: "tormenta con granizo fuerte",
+    0: "despejado/soleado", 1: "mayormente despejado", 2: "parcialmente nublado", 3: "nublado",
+    45: "niebla", 48: "niebla escarchada",
+    51: "llovizna ligera", 53: "llovizna moderada", 55: "llovizna densa",
+    56: "llovizna helada ligera", 57: "llovizna helada densa",
+    61: "lluvia ligera", 63: "lluvia moderada", 65: "lluvia intensa",
+    66: "lluvia helada ligera", 67: "lluvia helada intensa",
+    71: "nieve ligera", 73: "nieve moderada", 75: "nieve intensa",
+    77: "granizo", 80: "chubascos ligeros", 81: "chubascos moderados", 82: "chubascos fuertes",
+    85: "chubascos de nieve ligeros", 86: "chubascos de nieve fuertes",
+    95: "tormenta", 96: "tormenta con granizo ligera", 99: "tormenta con granizo fuerte",
 }
 
-# ----- Utilidades -----
+# ====== UTILIDADES (CLIMA) ======
 async def geocode_city(city: str) -> Dict:
     url = "https://geocoding-api.open-meteo.com/v1/search"
     params = {"name": city, "count": 1, "language": "es", "format": "json"}
@@ -134,17 +123,10 @@ async def geocode_city(city: str) -> Dict:
 async def fetch_weather(lat: float, lon: float, tz: str, start: date, days: int) -> List[WeatherDay]:
     end = start + timedelta(days=days - 1)
     params = {
-        "latitude": lat,
-        "longitude": lon,
-        "daily": ",".join([
-            "weathercode",
-            "precipitation_sum",
-            "temperature_2m_max",
-            "temperature_2m_min",
-        ]),
+        "latitude": lat, "longitude": lon,
+        "daily": "weathercode,precipitation_sum,temperature_2m_max,temperature_2m_min",
         "timezone": tz or "auto",
-        "start_date": start.isoformat(),
-        "end_date": end.isoformat(),
+        "start_date": start.isoformat(), "end_date": end.isoformat(),
     }
     url = "https://api.open-meteo.com/v1/forecast"
     async with httpx.AsyncClient(timeout=30) as client:
@@ -153,20 +135,18 @@ async def fetch_weather(lat: float, lon: float, tz: str, start: date, days: int)
         d = r.json()
 
     daily = d.get("daily", {})
-    out: List[WeatherDay] = []
     times = daily.get("time", [])
+    out: List[WeatherDay] = []
     for i, day_iso in enumerate(times):
         code = int(daily["weathercode"][i])
-        out.append(
-            WeatherDay(
-                date=day_iso,
-                code=code,
-                summary=WMO_CODE_MAP.get(code, ""),
-                temp_max=float(daily["temperature_2m_max"][i]),
-                temp_min=float(daily["temperature_2m_min"][i]),
-                precipitation_sum=float(daily.get("precipitation_sum", [0.0]*len(times))[i]),
-            )
-        )
+        out.append(WeatherDay(
+            date=day_iso,
+            code=code,
+            summary=WMO_CODE_MAP.get(code, ""),
+            temp_max=float(daily["temperature_2m_max"][i]),
+            temp_min=float(daily["temperature_2m_min"][i]),
+            precipitation_sum=float(daily.get("precipitation_sum", [0.0]*len(times))[i]),
+        ))
     return out
 
 def summarize_weather(days: List[WeatherDay]) -> str:
@@ -179,105 +159,139 @@ def summarize_weather(days: List[WeatherDay]) -> str:
         overall = "nublado"
     else:
         overall = "soleado"
-    temp_range = (min(d.temp_min for d in days), max(d.temp_max for d in days))
-    return f"Panorama general: {overall}. Temperaturas entre {temp_range[0]:.0f}°C y {temp_range[1]:.0f}°C. Lluvia acumulada aprox. {total_rain:.1f} mm."
+    mn = min(d.temp_min for d in days)
+    mx = max(d.temp_max for d in days)
+    return f"Panorama general: {overall}. Temperaturas entre {mn:.0f}°C y {mx:.0f}°C. Lluvia acumulada aprox. {total_rain:.1f} mm."
 
-# ----- Agentes -----
+# ====== UTILIDADES (SERPAPI) ======
+async def serpapi_search(api_key: Optional[str], q: str, location: str, num: int = 6) -> List[Dict]:
+    """Devuelve una listita de {title, link, snippet} usando SerpAPI (Google). Si falta API key → []."""
+    if not api_key:
+        return []
+    url = "https://serpapi.com/search.json"
+    params = {
+        "engine": "google",
+        "q": f"{q} in {location}",
+        "api_key": api_key,
+        "num": max(3, min(10, num)),
+        "hl": "es",
+        "gl": "es",
+    }
+    async with httpx.AsyncClient(timeout=25) as client:
+        r = await client.get(url, params=params)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+    results = []
+    for item in (data.get("organic_results") or [])[:num]:
+        results.append({
+            "title": item.get("title", "")[:120],
+            "link": item.get("link", ""),
+            "snippet": item.get("snippet", "")[:200],
+        })
+    return results
+
+# ====== AGENTES ======
 class WeatherAgent:
     @staticmethod
     async def get(city: str, start: Optional[str], n_days: int) -> Dict:
         geo = await geocode_city(city)
-        start_date = (
-            datetime.fromisoformat(start).date() if start else (date.today() + timedelta(days=1))
-        )
+        start_date = datetime.fromisoformat(start).date() if start else (date.today() + timedelta(days=1))
         days = await fetch_weather(geo["lat"], geo["lon"], geo["timezone"], start_date, n_days)
         return {"geo": geo, "days": [d.dict() for d in days], "overview": summarize_weather(days)}
+
+def _safe_json_extract(text: str) -> Dict:
+    """Intenta cargar JSON. Si el modelo devolvió texto extra, recorta desde la 1ª { … } válida."""
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    # Busca el primer bloque {...}
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end+1])
+        except Exception:
+            return {}
+    return {}
 
 class PlannerAgent:
     @staticmethod
     async def plan_itinerary(keys: UserKeys, city: str, weather: Dict, n_days: int, language: str) -> Itinerary:
-        if OpenAI is None:
-            raise HTTPException(status_code=500, detail="OpenAI SDK no disponible en el entorno.")
-        client = OpenAI(api_key=keys.openai_api_key)
+        if Groq is None:
+            raise HTTPException(status_code=500, detail="Groq SDK no disponible en el entorno.")
+        client = Groq(api_key=keys.groq_api_key)
 
-        schema = {
-            "name": "TravelItinerary",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string"},
-                    "days": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "date": {"type": "string"},
-                                "title": {"type": "string"},
-                                "morning": {"type": "string"},
-                                "afternoon": {"type": "string"},
-                                "evening": {"type": "string"},
-                                "notes": {"type": "string"},
-                            },
-                            "required": ["date", "title", "morning", "afternoon", "evening"],
-                        },
-                    },
-                    "weather_overview": {"type": "string"},
-                },
-                "required": ["location", "days", "weather_overview"],
-                "additionalProperties": False,
-            },
-            "strict": True,
-        }
+        # Enriquecer con POIs via SerpAPI (si hay key)
+        pois = await serpapi_search(keys.serpapi_api_key, "top attractions", city, num=6)
+        eats = await serpapi_search(keys.serpapi_api_key, "best local restaurants", city, num=4)
 
-        weather_overview = weather.get("overview", "")
-        day_objs = weather.get("days", [])
-
-        guide_lines = []
-        for d in day_objs:
+        # Hints de clima por día
+        hints = []
+        for d in weather.get("days", []):
             hint = ""
             if d["precipitation_sum"] >= 2:
-                hint = "(día lluvioso: prioriza planes bajo techo)"
+                hint = "(día lluvioso: prioriza museos, mercados cubiertos, tours bajo techo)"
             elif d["code"] in (0, 1):
-                hint = "(día soleado: actividades al aire libre recomendadas)"
-            guide_lines.append(f"{d['date']}: {WMO_CODE_MAP.get(d['code'], '')} {hint}")
-        guide_text = "\n".join(guide_lines)
+                hint = "(día soleado: parques, miradores y actividades al aire libre)"
+            hints.append(f"{d['date']}: {WMO_CODE_MAP.get(d['code'], '')} {hint}")
+        guide_text = "\n".join(hints)
 
-        system_prompt = (
-            "Eres un agente de viajes detallista y práctico. Devuelve respuestas claras en el idioma solicitado. "
-            "Cumple estrictamente el esquema JSON indicado. Limita a planes realistas, con tiempos y zonas agrupadas "
-            "para minimizar traslados. Incluye comida local, transporte sugerido y alternativas si llueve. No inventes precios."
-        )
-
-        user_prompt = f"""
-Genera un itinerario para {n_days} día(s) en {city}.
-Idioma: {language}.
-Resumen del clima: {weather_overview}.
-Guía por día:
-{guide_text}
-Estructura exacta: devuelve sólo JSON que cumpla el esquema (sin texto adicional).
+        schema_text = """
+Devuelve SOLO un JSON válido con esta estructura exacta:
+{
+  "location": "string",
+  "days": [
+    { "date":"YYYY-MM-DD", "title":"string", "morning":"string", "afternoon":"string", "evening":"string", "notes":"string opcional" }
+  ],
+  "weather_overview": "string"
+}
+No incluyas nada fuera del JSON.
 """
 
-        resp = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+        pois_txt = ""
+        if pois:
+            pois_txt = "Sugerencias (POIs):\n" + "\n".join([f"- {p['title']}" for p in pois])
+        eats_txt = ""
+        if eats:
+            eats_txt = "Comida local (ideas):\n" + "\n".join([f"- {e['title']}" for e in eats])
+
+        sys = (
+            "Eres un agente de viajes práctico y realista. Planifica actividades cercanas entre sí, "
+            "incluye sugerencias de transporte (a pie/transporte público), menciona comida local y alternativas si llueve. "
+            "NO inventes precios ni reservas. Tu salida DEBE ser JSON exactamente como se te pide."
+        )
+        user = f"""Ciudad: {city}
+Días: {n_days}
+Idioma de la respuesta: {language}
+Resumen del clima: {weather.get('overview','')}
+Guía por día:
+{guide_text}
+
+{pois_txt}
+
+{eats_txt}
+
+{schema_text}
+"""
+
+        completion = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": user},
             ],
-            response_format={"type": "json_schema", "json_schema": schema},
+            temperature=0.4,
+            max_tokens=2000,
         )
 
-        # Extraer JSON
-        try:
-            content = resp.output[0].content[0].text  # SDK 1.x Responses API
-            data = json.loads(content)
-        except Exception:
-            raw = getattr(resp, "output_text", None) or getattr(resp, "content", None)
-            data = json.loads(raw) if isinstance(raw, str) else {}
+        content = completion.choices[0].message.content if completion.choices else "{}"
+        data = _safe_json_extract(content)
+        if not data:
+            raise HTTPException(status_code=500, detail="No se pudo construir el JSON del itinerario.")
+        return Itinerary(**data)
 
-        itinerary = Itinerary(**data)
-        return itinerary
-
-# ----- Orquestador -----
 class Orchestrator:
     @staticmethod
     async def handle(req: ChatRequest) -> Dict:
@@ -295,58 +309,50 @@ class Orchestrator:
             prefs = req.prefs
             weather = await WeatherAgent.get(prefs.location, prefs.start_date, prefs.days)
             itinerary = await PlannerAgent.plan_itinerary(req.keys, prefs.location, weather, prefs.days, prefs.language)
-            return {
-                "type": "itinerary",
-                "itinerary": itinerary.dict(),
-                "weather": weather,
-                "message": f"Listo. Te propongo un itinerario para {prefs.location} con base en el clima previsto.",
-            }
+            return {"type": "itinerary", "itinerary": itinerary.dict(), "weather": weather,
+                    "message": f"Listo. Te propongo un itinerario para {prefs.location} con base en el clima y lugares destacados."}
 
         if wants_plan:
             return {"type": "need_prefs", "message": "¿Para qué ciudad y cuántos días?"}
-
         if wants_weather:
             return {"type": "need_city", "message": "¿De qué ciudad necesitas el clima?"}
 
-        if OpenAI is None:
-            return {"type": "chat", "message": "Estoy listo para ayudarte a planear tu viaje. Dime destino y días."}
-        client = OpenAI(api_key=req.keys.openai_api_key)
-        sys = "Eres un asistente de viajes amable y útil. Responde de forma breve y clara."
-        resp = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": sys},
-                *[{"role": m.role, "content": m.content} for m in req.history],
-                {"role": "user", "content": text},
-            ],
+        # Chat general con Groq
+        if Groq is None:
+            return {"type": "chat", "message": "Listo para ayudarte a planear tu viaje. Dime destino y días."}
+        client = Groq(api_key=req.keys.groq_api_key)
+        messages = [{"role": "system", "content": "Asistente de viajes breve y claro."}]
+        messages += [{"role": m.role, "content": m.content} for m in req.history]
+        messages += [{"role": "user", "content": text}]
+
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=messages,
+            temperature=0.5,
+            max_tokens=600,
         )
-        try:
-            answer = resp.output_text
-        except Exception:
-            answer = "Puedo ayudarte con destinos, clima e itinerarios. ¿A dónde te gustaría viajar?"
+        answer = completion.choices[0].message.content if completion.choices else "¿A dónde te gustaría viajar?"
         return {"type": "chat", "message": answer}
 
-# ----- Rutas -----
+# ====== RUTAS ======
 @app.get("/health")
 def health():
     return {"ok": True, "time": datetime.utcnow().isoformat()}
 
 @app.post("/chat")
 async def chat_endpoint(payload: ChatRequest):
-    if not payload.keys or not payload.keys.openai_api_key:
-        raise HTTPException(status_code=401, detail="Falta tu OPENAI_API_KEY.")
-    result = await Orchestrator.handle(payload)
-    return result
+    if not payload.keys or not payload.keys.groq_api_key:
+        raise HTTPException(status_code=401, detail="Falta tu GROQ_API_KEY.")
+    return await Orchestrator.handle(payload)
 
 @app.get("/weather")
 async def weather_endpoint(city: str, days: int = 3, start_date: Optional[str] = None):
-    w = await WeatherAgent.get(city, start_date, max(1, min(14, days)))
-    return w
+    return await WeatherAgent.get(city, start_date, max(1, min(14, days)))
 
 @app.post("/itinerary")
 async def itinerary_endpoint(body: Dict):
     try:
-        keys = UserKeys(openai_api_key=body.get("openai_api_key"))
+        keys = UserKeys(groq_api_key=body.get("groq_api_key"), serpapi_api_key=body.get("serpapi_api_key"))
         city = body["city"]
         days = int(body.get("days", 3))
         language = body.get("language", "es")
@@ -366,12 +372,11 @@ async def download_txt(body: Dict):
         raise HTTPException(status_code=400, detail="Itinerario inválido")
     lines = [f"Itinerario: {data.location}", f"{data.weather_overview}", ""]
     for d in data.days:
-        lines.append(f"Fecha: {d.date} — {d.title}")
-        lines.append(f"Mañana: {d.morning}")
-        lines.append(f"Tarde: {d.afternoon}")
-        lines.append(f"Noche: {d.evening}")
-        if d.notes:
-            lines.append(f"Notas: {d.notes}")
+        lines += [f"Fecha: {d.date} — {d.title}",
+                  f"Mañana: {d.morning}",
+                  f"Tarde: {d.afternoon}",
+                  f"Noche: {d.evening}"]
+        if d.notes: lines.append(f"Notas: {d.notes}")
         lines.append("")
     return {"filename": f"itinerario_{data.location.replace(' ', '_')}.txt", "content": "\n".join(lines)}
 
@@ -382,28 +387,18 @@ async def download_ics(body: Dict):
     except Exception:
         raise HTTPException(status_code=400, detail="Itinerario inválido")
 
-    def ics_escape(s: str) -> str:
+    def esc(s: str) -> str:
         return s.replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
 
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//TravelAgent//Vercel//ES",
-    ]
+    lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//TravelAgent//Vercel//ES"]
     for d in data.days:
         dt = datetime.fromisoformat(d.date)
-        dtstart = dt.strftime("%Y%m%d") + "T090000"
-        dtend = dt.strftime("%Y%m%d") + "T210000"
-        summary = ics_escape(f"{data.location}: {d.title}")
-        desc = ics_escape(
-            f"Mañana: {d.morning}\nTarde: {d.afternoon}\nNoche: {d.evening}\n{data.weather_overview}"
-        )
         lines += [
             "BEGIN:VEVENT",
-            f"DTSTART:{dtstart}",
-            f"DTEND:{dtend}",
-            f"SUMMARY:{summary}",
-            f"DESCRIPTION:{desc}",
+            f"DTSTART:{dt.strftime('%Y%m%d')}T090000",
+            f"DTEND:{dt.strftime('%Y%m%d')}T210000",
+            f"SUMMARY:{esc(f'{data.location}: {d.title}')}",
+            f"DESCRIPTION:{esc(f'Mañana: {d.morning}\\nTarde: {d.afternoon}\\nNoche: {d.evening}\\n{data.weather_overview}')}",
             "END:VEVENT",
         ]
     lines.append("END:VCALENDAR")

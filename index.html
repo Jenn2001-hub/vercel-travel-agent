@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agente de Viajes</title>
+  <title>Agente de Viajes </title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/styles.css" />
 </head>
@@ -12,9 +12,11 @@
   <div id="keysModal" class="modal visible">
     <div class="modal-card">
       <h2>Configura tus API Keys</h2>
-      <p class="muted">Tu clave se guarda sólo en tu navegador y se envía por HTTPS al backend para procesar tu solicitud. No se persiste en el servidor.</p>
-      <label>OPENAI_API_KEY</label>
-      <input id="openaiKey" type="password" placeholder="sk-..." />
+      <p class="muted">Se guardan en tu navegador (sessionStorage) y se envían por HTTPS cuando solicitas itinerarios/chat. No se persisten en el servidor.</p>
+      <label>GROQ_API_KEY</label>
+      <input id="groqKey" type="password" placeholder="gsk_..." />
+      <label>SERPAPI_API_KEY (opcional)</label>
+      <input id="serpKey" type="password" placeholder="xxxxxx" />
       <button id="saveKeys">Guardar y continuar</button>
     </div>
   </div>
@@ -70,21 +72,26 @@
   </main>
 
   <footer>
-    <small>Hecho con FastAPI + Vercel Functions.</small>
+    <small>Hecho con FastAPI + Groq + SerpAPI en Vercel.</small>
   </footer>
 
   <script>
     const $ = (sel) => document.querySelector(sel);
-    const keysModal = $('#keysModal');
-    const openaiInput = $('#openaiKey');
 
-    function getKey() { return sessionStorage.getItem('OPENAI_API_KEY') || ''; }
-    function setKey(v) { sessionStorage.setItem('OPENAI_API_KEY', v); }
+    // Keys en sessionStorage
+    const keysModal = $('#keysModal');
+    const groqInput = $('#groqKey');
+    const serpInput = $('#serpKey');
+    const getGroq = () => sessionStorage.getItem('GROQ_API_KEY') || '';
+    const setGroq = (v) => sessionStorage.setItem('GROQ_API_KEY', v);
+    const getSerp = () => sessionStorage.getItem('SERPAPI_API_KEY') || '';
+    const setSerp = (v) => sessionStorage.setItem('SERPAPI_API_KEY', v);
 
     $('#saveKeys').onclick = () => {
-      const v = openaiInput.value.trim();
-      if(!v) { alert('Ingresa tu OPENAI_API_KEY'); return; }
-      setKey(v);
+      const g = groqInput.value.trim();
+      if(!g){ alert('Ingresa tu GROQ_API_KEY'); return; }
+      setGroq(g);
+      setSerp(serpInput.value.trim());
       keysModal.classList.remove('visible');
     };
     $('#openKeys').onclick = () => { keysModal.classList.add('visible'); };
@@ -111,13 +118,13 @@
       chatInput.value='';
 
       const payload = {
-        keys: { openai_api_key: getKey() },
+        keys: { groq_api_key: getGroq(), serpapi_api_key: getSerp() || null },
         message: text,
         history,
       };
 
       const res = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-      const data = await res.json();
+      const data = await res.json().catch(()=>({message:'Error de red'}));
 
       if(data.type === 'need_prefs'){
         addMsg('assistant', data.message + ' (usa el formulario de itinerario a la izquierda)');
@@ -132,12 +139,12 @@
         renderItinerary(data.itinerary);
         return;
       }
-      addMsg('assistant', data.message || '');
+      addMsg('assistant', data.message || 'Listo.');
       history.push({ role: 'user', content: text });
-      history.push({ role: 'assistant', content: data.message });
+      history.push({ role: 'assistant', content: data.message || '' });
     });
 
-    // --- Planner form ---
+    // --- Planner ---
     const planForm = $('#planForm');
     const planOutput = $('#planOutput');
     const downloadBtns = $('#downloadBtns');
@@ -169,7 +176,11 @@
       const start_date = form.get('start_date');
       const language = form.get('language') || 'es';
 
-      const body = { openai_api_key: getKey(), city, days, start_date, language };
+      const body = {
+        groq_api_key: getGroq(),
+        serpapi_api_key: getSerp() || null,
+        city, days, start_date, language
+      };
       const res = await fetch('/api/itinerary', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if(!res.ok){
         const err = await res.json().catch(()=>({detail:'Error desconocido'}));
@@ -181,7 +192,7 @@
       addMsg('assistant', `Generé tu itinerario para ${city}. ¡Revisa la tarjeta!`);
     });
 
-    // --- Descargas (txt / ics) ---
+    // --- Descargas ---
     async function triggerDownload(endpoint, filenameFallback){
       if(!lastItinerary){ alert('Primero genera un itinerario.'); return; }
       const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(lastItinerary) });
@@ -200,8 +211,8 @@
     $('#dlTxt').onclick = () => triggerDownload('/api/download/txt', 'itinerario.txt');
     $('#dlIcs').onclick = () => triggerDownload('/api/download/ics', 'itinerario.ics');
 
-    // Abrir modal si no hay key
-    window.addEventListener('load', ()=>{ if(!getKey()) keysModal.classList.add('visible'); });
+    // Abre modal si no hay key
+    window.addEventListener('load', ()=>{ if(!getGroq()) keysModal.classList.add('visible'); });
   </script>
 </body>
 </html>
