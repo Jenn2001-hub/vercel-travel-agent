@@ -327,23 +327,23 @@ class Orchestrator:
         return {"type": "chat", "message": answer}
 
 # ----- Rutas -----
-@app.get("/api/health")
+@app.get("/health")
 def health():
     return {"ok": True, "time": datetime.utcnow().isoformat()}
 
-@app.post("/api/chat")
+@app.post("/chat")
 async def chat_endpoint(payload: ChatRequest):
     if not payload.keys or not payload.keys.openai_api_key:
         raise HTTPException(status_code=401, detail="Falta tu OPENAI_API_KEY.")
     result = await Orchestrator.handle(payload)
     return result
 
-@app.get("/api/weather")
+@app.get("/weather")
 async def weather_endpoint(city: str, days: int = 3, start_date: Optional[str] = None):
     w = await WeatherAgent.get(city, start_date, max(1, min(14, days)))
     return w
 
-@app.post("/api/itinerary")
+@app.post("/itinerary")
 async def itinerary_endpoint(body: Dict):
     try:
         keys = UserKeys(openai_api_key=body.get("openai_api_key"))
@@ -358,7 +358,7 @@ async def itinerary_endpoint(body: Dict):
     it = await PlannerAgent.plan_itinerary(keys, city, w, days, language)
     return it.dict()
 
-@app.post("/api/download/txt")
+@app.post("/download/txt")
 async def download_txt(body: Dict):
     try:
         data = Itinerary(**body)
@@ -375,7 +375,7 @@ async def download_txt(body: Dict):
         lines.append("")
     return {"filename": f"itinerario_{data.location.replace(' ', '_')}.txt", "content": "\n".join(lines)}
 
-@app.post("/api/download/ics")
+@app.post("/download/ics")
 async def download_ics(body: Dict):
     try:
         data = Itinerary(**body)
