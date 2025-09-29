@@ -403,3 +403,4 @@ async def download_ics(body: Dict):
         ]
     lines.append("END:VCALENDAR")
     return {"filename": f"itinerario_{data.location.replace(' ', '_')}.ics", "content": "\n".join(lines)}
+# NOTA: en producción, usa variables de entorno para las API keys y no las envíes desde el frontend.
