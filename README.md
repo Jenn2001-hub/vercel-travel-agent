@@ -38,9 +38,7 @@ groq==0.9.0
 **Requisitos**: Python 3.10+ (recomendado 3.11/3.12)
 
 1) Instala dependencias:
-```bash
 pip install -r requirements.txt
-
 
 Arranca el backend:
 uvicorn api.index:app --reload --port 8000
