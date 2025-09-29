@@ -25,7 +25,7 @@
     <h1>✈️ Agente de Viajes</h1>
     <div class="controls">
       <button id="openKeys">🔐 API Keys</button>
-      <a href="/api/health" target="_blank" class="link">health</a>
+      <a href="/api/index/health" target="_blank" class="link">health</a>
     </div>
   </header>
 
@@ -123,7 +123,7 @@
         history,
       };
 
-      const res = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const res = await fetch('/api/index/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const data = await res.json().catch(()=>({message:'Error de red'}));
 
       if(data.type === 'need_prefs'){
@@ -181,7 +181,7 @@
         serpapi_api_key: getSerp() || null,
         city, days, start_date, language
       };
-      const res = await fetch('/api/itinerary', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const res = await fetch('/api/index/itinerary', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if(!res.ok){
         const err = await res.json().catch(()=>({detail:'Error desconocido'}));
         alert('Error: ' + (err.detail || res.status));
@@ -208,8 +208,8 @@
       URL.revokeObjectURL(url);
     }
 
-    $('#dlTxt').onclick = () => triggerDownload('/api/download/txt', 'itinerario.txt');
-    $('#dlIcs').onclick = () => triggerDownload('/api/download/ics', 'itinerario.ics');
+    $('#dlTxt').onclick = () => triggerDownload('/api/index/download/txt', 'itinerario.txt');
+    $('#dlIcs').onclick = () => triggerDownload('/api/index/download/ics', 'itinerario.ics');
 
     // Abre modal si no hay key
     window.addEventListener('load', ()=>{ if(!getGroq()) keysModal.classList.add('visible'); });
