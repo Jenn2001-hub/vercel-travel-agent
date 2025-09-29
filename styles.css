@@ -1,0 +1,208 @@
+/* =========================================================
+   Variables y base
+   ========================================================= */
+:root{
+  --bg: #0b0f14;
+  --surface: #111821;
+  --surface-2: #0e141c;
+  --border: #1d2936;
+  --border-2: #1c2430;
+  --text: #e6eef9;
+  --muted: #92a0b3;
+  --accent: #00d0ff;
+  --btn: #0b6;
+  --btn-border: #0a5;
+}
+
+*{ box-sizing: border-box; }
+html, body{ height: 100%; }
+body{
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial;
+  line-height: 1.45;
+}
+
+/* Utilidades */
+.hidden{ display: none !important; }
+.muted{ color: var(--muted); }
+.card{
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+/* =========================================================
+   Encabezado
+   ========================================================= */
+header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-2);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+}
+h1{
+  margin: 0;
+  font-size: 20px;
+}
+.controls{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.controls .link{
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+/* =========================================================
+   Layout principal
+   ========================================================= */
+main{
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+section{
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+/* Responsive simple */
+@media (max-width: 900px){
+  main{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   Formularios y botones
+   ========================================================= */
+label{
+  display: inline-block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+input, select, button{
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+input:focus, select:focus{
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0,208,255,0.15);
+}
+
+button{
+  background: var(--btn);
+  border-color: var(--btn-border);
+  cursor: pointer;
+  transition: transform .02s ease, filter .15s ease;
+}
+button:hover{ filter: brightness(1.05); }
+button:active{ transform: translateY(1px); }
+
+/* Filas del planificador */
+.planner .row{
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0;
+}
+@media (max-width: 520px){
+  .planner .row{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Lista de días del itinerario */
+.days{ padding-left: 18px; margin: 10px 0 0; }
+.days li{ margin: 12px 0; }
+
+/* =========================================================
+   Chat
+   ========================================================= */
+.chat-box{
+  height: 380px;
+  overflow: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.msg{
+  max-width: 80%;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  word-wrap: break-word;
+}
+.msg.user{
+  margin-left: auto;
+  background: #14324a;
+  border: 1px solid #174463;
+}
+.msg.assistant{
+  background: #1d2532;
+  border: 1px solid #253041;
+}
+
+.chat-form{
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* =========================================================
+   Modal de API Keys
+   ========================================================= */
+.modal{
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.6);
+  padding: 16px;
+}
+.modal.visible{ display: flex; }
+
+.modal-card{
+  width: min(520px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+.modal-card h2{ margin: 0 0 6px; }
+.modal-card label{ margin-top: 8px; }
+.modal-card input{ width: 100%; }
+.modal-card button{ margin-top: 12px; width: 100%; }
+
+/* =========================================================
+   Pie de página
+   ========================================================= */
+footer{
+  padding: 14px 16px 24px;
+  color: var(--muted);
+  text-align: center;
+  opacity: .9;
+}
